@@ -1,0 +1,37 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# venv
+.venv/
+venv/
+env/
+
+# ML
+models/
+*.ckpt
+*.pth
+*.bin
+
+# audio temps
+tmp/
+*.wav.tmp
+stems/
+output/
+
+# local configs
+config.local.json
+*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
