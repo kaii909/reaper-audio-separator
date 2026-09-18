@@ -24,10 +24,14 @@ if SRC_DIR.exists():
 # CONFIG - edit presets here
 # ============================================================
 PRESETS = {
-    "1": {"name": "stems (4)", "model": "htdemucs_ft.yaml"},
-    "2": {"name": "vocals", "model": "5_HP-Karaoke-UVR.pth"},
-    "3": {"name": "denoise", "model": "UVR-DeNoise-Lite.pth"},
-    "4": {"name": "dereverb", "model": "UVR-DeEcho-DeReverb.pth"},
+    "1": {"name": "standard stems (4)", "model": "htdemucs_ft.yaml"},
+    "2": {"name": "lightweight vocal model (2)", "model": "5_HP-Karaoke-UVR.pth"},
+    "3": {"name": "lite de-noise (1)", "model": "UVR-DeNoise-Lite.pth"},
+    "4": {"name": "de-reverb (1)", "model": "UVR-DeEcho-DeReverb.pth"},
+    "5": {"name": "state-of-art stems (6)", "model": "BS-Roformer-SW.ckpt"},
+    "6": {"name": "state-of-art de-reverb/de-echo (1)", "model": "dereverb-echo_mel_band_roformer_sdr_13.4843_v2.ckpt"},
+    "7": {"name": "state-of-art de-noise/de-bleed (1)", "model": "mel_band_roformer_denoise_debleed_gabox.ckpt"},
+    # you can create new ones, run 'audio-separator -l' inside the virtual environment to list models
 }
 
 as_binary = "audio-separator.exe" if sys.platform == "win32" else "audio-separator"
@@ -116,7 +120,9 @@ def probe_audio_file(filepath):
         sr = int(parts[3]) if len(parts) > 3 and parts[3] else 44100
         return bits, channels, fmt, sr
     except (OSError, subprocess.SubprocessError, ValueError):
-        return 16, 2, "s16", 44100
+        log("[WARN] ffprobe execution failed, skipping probe_audio_file")
+        log("output may be slightly lossy")
+        return 0, 0, "", 0
 
 
 def export_item(item, output_path):
@@ -163,6 +169,7 @@ def export_item(item, output_path):
         str(output_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
+
 
 def run_separator(input_path, output_dir, model):
     """run audio-separator"""
@@ -213,44 +220,31 @@ def run_separator(input_path, output_dir, model):
         return False
 
 
-def import_stems(stem_paths, position, length):
+def import_stems(stem_paths, position):
     """create new tracks and import stems as items."""
     n = RPR.RPR_CountTracks(0)
 
     for i, p in enumerate(stem_paths):
         if not p.exists():
-            log(f"  WARNING: file not found: {p.name}")
             continue
 
-        if p.stat().st_size == 0:
-            log(f"  WARNING: file is empty: {p.name}")
-            continue
+        RPR.RPR_InsertMedia(str(p), 1)
 
-        RPR.RPR_InsertTrackAtIndex(n + i, True)
         track = RPR.RPR_GetTrack(0, n + i)
+        item = RPR.RPR_GetTrackMediaItem(track, 0)
 
-        name = p.stem
-        if "(" in name and ")" in name:
-            name = name.split("(")[-1].rstrip(")")
-        RPR.RPR_GetSetMediaTrackInfo_String(track, "P_NAME", name, True)
-
-        item = RPR.RPR_AddMediaItemToTrack(track)
+        # align item with original
         RPR.RPR_SetMediaItemInfo_Value(item, "D_POSITION", position)
-        RPR.RPR_SetMediaItemInfo_Value(item, "D_LENGTH", length)
 
-        source = RPR.RPR_PCM_Source_CreateFromFile(str(p))
-        if not source:
-            log(f"  ERROR: failed to create source for {p.name}")
-            continue
-
-        take = RPR.RPR_AddTakeToMediaItem(item)
-        RPR.RPR_SetMediaItemTake_Source(take, source)
         RPR.RPR_UpdateItemInProject(item)
-
-        log(f"  imported: {p.name}")
 
     RPR.RPR_UpdateArrange()
 
+def log_available_presets():
+    """print all available presets and their models to the console."""
+    log("[+] available presets:")
+    for key, val in PRESETS.items():
+        log(f"  {key}: {val['name']} ({val['model']})")
 
 # ============================================================
 # MAIN
@@ -263,7 +257,9 @@ def main():
     log(f"SRC_DIR: {SRC_DIR}")
     log(f"AUDIO_SEP_BIN: {AUDIO_SEP_BIN}")
 
-    log("[stem-splitter] starting")
+    log("===== [ reaper audio-separator bridge script ] =====")
+    log_available_presets()
+    log("[+] enter one of the numbers above in the dialog box")
 
     item = RPR.RPR_GetSelectedMediaItem(0, 0)
     if not item:
@@ -312,15 +308,14 @@ def main():
         log("[!] separation failed")
         return
 
-    time.sleep(0.5)
+    # wait for filesystem to sync and release file locks
+    time.sleep(1.0)
 
     all_files = set()
     for pattern in AUDIO_FORMATS:
         all_files.update(out_dir.glob(pattern))
 
-    # takes the new files
     new_stems = sorted(all_files - existing_files)
-
     new_stems = [s for s in new_stems if s.name != "_input.wav"]
 
     if not new_stems:
@@ -329,8 +324,8 @@ def main():
 
     log(f"[+] importing {len(new_stems)} stems to new tracks")
     pos = RPR.RPR_GetMediaItemInfo_Value(item, "D_POSITION")
-    length = RPR.RPR_GetMediaItemInfo_Value(item, "D_LENGTH")
-    import_stems(new_stems, pos, length)
+
+    import_stems(new_stems, pos)
 
     log(f"[done] stems saved in: {out_dir}")
 
