@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
 reaper extension for stem splitting using audio-separator.
-load this script as an action in reaper (Actions > Load...).
+load this script as an action in reaper (Actions > Show action list...).
 """
 
-import os
 import subprocess
 import sys
 import time
@@ -14,10 +13,7 @@ from pathlib import Path
 
 import reaper_python as RPR
 
-try:
-    SCRIPT_DIR = Path(__file__).parent
-except NameError:
-    SCRIPT_DIR = Path(os.getcwd())
+SCRIPT_DIR = Path(sys.path[0]).parent
 
 # add src directory to python path so we can import reaper_python
 SRC_DIR = SCRIPT_DIR / "src"
@@ -34,10 +30,16 @@ PRESETS = {
     "4": {"name": "dereverb", "model": "UVR-DeEcho-DeReverb.pth"},
 }
 
-# absolute path to audio-separator binary (adjust)
-AUDIO_SEP_BIN = Path(
-    "/mnt/myfiles/PROJECTS/programs/github/reaper-audio-separator/.venv/bin/audio-separator"
+as_binary = "audio-separator.exe" if sys.platform == "win32" else "audio-separator"
+
+# try to find a path to audio-separator, if not possible, fallback to absolute path (adjustable)
+AUDIO_SEP_BIN = (
+    SCRIPT_DIR / ".venv" / ("Scripts" if sys.platform == "win32" else "bin") / as_binary
 )
+if not AUDIO_SEP_BIN.exists():
+    AUDIO_SEP_BIN = Path(
+        "enter a path manually in the script"  # ex: "/home/user/.python/.venv/bin/audio-separator"
+    )
 
 # supported audio formats
 AUDIO_FORMATS = ["*.wav", "*.flac", "*.mp3", "*.ogg", "*.m4a", "*.aac", "*.wma"]
@@ -46,9 +48,11 @@ AUDIO_FORMATS = ["*.wav", "*.flac", "*.mp3", "*.ogg", "*.m4a", "*.aac", "*.wma"]
 # HELPERS
 # ============================================================
 
+
 def log(msg):
     """write message to reaper console."""
     RPR.RPR_ShowConsoleMsg(msg + "\n")
+
 
 def get_project_sample_rate():
     """return project sample rate in Hz."""
@@ -65,6 +69,7 @@ def get_project_sample_rate():
                 return RPR.RPR_GetMediaSourceSampleRate(source)
     return 44100
 
+
 def get_item_source_path(item):
     """return file path of item's active take source."""
     take = RPR.RPR_GetActiveTake(item)
@@ -76,6 +81,7 @@ def get_item_source_path(item):
     _, filename, _ = RPR.RPR_GetMediaSourceFileName(source, "", 2048)
     return filename if filename else None
 
+
 def get_output_dir(take_name):
     """return timestamped output dir in project's Media/stems/ folder."""
     project_path, _ = RPR.RPR_GetProjectPath("", 2048)
@@ -86,13 +92,20 @@ def get_output_dir(take_name):
     out.mkdir(parents=True, exist_ok=True)
     return out
 
+
 def probe_audio_file(filepath):
     """detect bit depth, channels, and sample rate of audio file."""
     cmd = [
-        "ffprobe", "-v", "error",
-        "-select_streams", "a:0",
-        "-show_entries", "stream=bits_per_raw_sample,channels,sample_fmt,sample_rate",
-        "-of", "csv=p=0", str(filepath),
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=bits_per_raw_sample,channels,sample_fmt,sample_rate",
+        "-of",
+        "csv=p=0",
+        str(filepath),
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -105,15 +118,21 @@ def probe_audio_file(filepath):
     except (OSError, subprocess.SubprocessError, ValueError):
         return 16, 2, "s16", 44100
 
+
 def export_item(item, output_path):
     """extract item as wav preserving bit depth and channels"""
     source = get_item_source_path(item)
     if not source:
         raise ValueError("item has no audio source")
-    pos = RPR.RPR_GetMediaItemInfo_Value(item, "D_POSITION")
-    length = RPR.RPR_GetMediaItemInfo_Value(item, "D_LENGTH")
+
     take = RPR.RPR_GetActiveTake(item)
+    length = RPR.RPR_GetMediaItemInfo_Value(item, "D_LENGTH")
     offset = RPR.RPR_GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
+    playrate = RPR.RPR_GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+
+    # calculate source duration considering item playrate
+    source_duration = length * playrate
+
     project_sr = get_project_sample_rate()
     bits, channels, fmt, _ = probe_audio_file(source)
 
@@ -125,10 +144,23 @@ def export_item(item, output_path):
         codec = "pcm_s16le"
 
     cmd = [
-        "ffmpeg", "-y", "-loglevel", "error",
-        "-ss", str(pos + offset), "-t", str(length),
-        "-i", source, "-ar", str(project_sr),
-        "-ac", str(channels), "-c:a", codec, str(output_path),
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        "-ss",
+        str(offset),
+        "-t",
+        str(source_duration),
+        "-i",
+        source,
+        "-ar",
+        str(project_sr),
+        "-ac",
+        str(channels),
+        "-c:a",
+        codec,
+        str(output_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
 
@@ -140,38 +172,46 @@ def run_separator(input_path, output_dir, model):
     cmd = [
         str(AUDIO_SEP_BIN),
         str(input_path),
-        "-m", model,
-        "--output_dir", str(output_dir),
-        "--output_format", "WAV",
+        "-m",
+        model,
+        "--output_dir",
+        str(output_dir),
+        "--output_format",
+        "WAV",
     ]
 
     log(f"  running: {model}")
     log("  this may take a while...")
 
-    RPR.RPR_PreventUIRefresh(1)
-    RPR.RPR_PreventUIRefresh(-1)
-
     try:
         result = subprocess.run(
             cmd,
-            capture_output=False,
+            capture_output=True,
             text=True,
             timeout=None,
             check=False,
         )
 
-        RPR.RPR_PreventUIRefresh(1)
-        RPR.RPR_PreventUIRefresh(-1)
+        if result.stdout:
+            for line in result.stdout.splitlines():
+                if line.strip():
+                    log(f"  [SEPARATOR] {line}")
+
+        if result.stderr:
+            for line in result.stderr.splitlines():
+                if line.strip():
+                    log(f"  [SEPARATOR] {line}")
 
         if result.returncode == 0:
             log("  separation completed successfully")
             return True
-        
+
         log(f"  ERROR: process exited with code {result.returncode}")
         return False
     except (OSError, subprocess.SubprocessError) as e:
         log(f"  ERROR: {e}")
         return False
+
 
 def import_stems(stem_paths, position, length):
     """create new tracks and import stems as items."""
@@ -211,12 +251,18 @@ def import_stems(stem_paths, position, length):
 
     RPR.RPR_UpdateArrange()
 
+
 # ============================================================
 # MAIN
 # ============================================================
 
+
 def main():
     RPR.RPR_ClearConsole()
+    log(f"SCRIPT_DIR: {SCRIPT_DIR}")
+    log(f"SRC_DIR: {SRC_DIR}")
+    log(f"AUDIO_SEP_BIN: {AUDIO_SEP_BIN}")
+
     log("[stem-splitter] starting")
 
     item = RPR.RPR_GetSelectedMediaItem(0, 0)
@@ -226,8 +272,7 @@ def main():
 
     options = "\n".join(f"{k}: {v['name']}" for k, v in PRESETS.items())
     retval, _, _, _, choice, _ = RPR.RPR_GetUserInputs(
-        "Stem Splitter", 1,
-        f"preset:\n{options}\n\nnumber:", "1", 16
+        "Stem Splitter", 1, f"preset:\n{options}\n\nnumber:", "1", 16
     )
 
     if not retval or choice not in PRESETS:
@@ -243,12 +288,22 @@ def main():
 
     # wav_in is the name of the ffmpeg-processed take that enters the audio-separator
     # name the input as user date and time so new stems dont overwrite
-    wav_in = out_dir / f"input_{datetime.now(tz=timezone.utc).astimezone().strftime("%Y%m%d_%H%M")}.wav"
+    wav_in = (
+        out_dir
+        / f"input_{datetime.now(tz=timezone.utc).astimezone().strftime("%Y%m%d_%H%M")}.wav"
+    )
+
+    # capture the state of the directory before running audio-separator
+    # so it loads only freshly created stems
+    existing_files = set()
+    for pattern in AUDIO_FORMATS:
+        existing_files.update(out_dir.glob(pattern))
+    existing_files.add(wav_in)
 
     log(f"[+] exporting item -> {wav_in.name}")
     try:
         export_item(item, wav_in)
-    except (OSError, subprocess.SubprocessError, ValueError) as e:
+    except Exception as e:  # noqa: BLE001
         log(f"[!] export failed: {e}")
         return
 
@@ -259,23 +314,26 @@ def main():
 
     time.sleep(0.5)
 
-    stems = []
+    all_files = set()
     for pattern in AUDIO_FORMATS:
-        stems.extend(out_dir.glob(pattern))
-    stems = list(set(stems))
-    stems = [s for s in stems if s.name != "_input.wav"]
-    stems.sort()
+        all_files.update(out_dir.glob(pattern))
 
-    if not stems:
+    # takes the new files
+    new_stems = sorted(all_files - existing_files)
+
+    new_stems = [s for s in new_stems if s.name != "_input.wav"]
+
+    if not new_stems:
         log("[!] no stems generated")
         return
 
-    log(f"[+] importing {len(stems)} stems to new tracks")
+    log(f"[+] importing {len(new_stems)} stems to new tracks")
     pos = RPR.RPR_GetMediaItemInfo_Value(item, "D_POSITION")
     length = RPR.RPR_GetMediaItemInfo_Value(item, "D_LENGTH")
-    import_stems(stems, pos, length)
+    import_stems(new_stems, pos, length)
 
     log(f"[done] stems saved in: {out_dir}")
+
 
 # ============================================================
 # EXECUTION
@@ -285,5 +343,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception: # noqa: BLE001
+    except Exception:  # noqa: BLE001
         RPR.RPR_ShowConsoleMsg(f"CRITICAL ERROR:\n{traceback.format_exc()}\n")
