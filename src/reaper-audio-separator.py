@@ -49,8 +49,6 @@ AUDIO_FORMATS = ["*.wav", "*.flac", "*.mp3", "*.ogg", "*.m4a", "*.aac", "*.wma"]
 def log(msg):
     """write message to reaper console."""
     RPR.RPR_ShowConsoleMsg(msg + "\n")
-    RPR.RPR_PreventUIRefresh(1)
-    RPR.RPR_PreventUIRefresh(-1)
 
 def get_project_sample_rate():
     """return project sample rate in Hz."""
@@ -78,13 +76,12 @@ def get_item_source_path(item):
     _, filename, _ = RPR.RPR_GetMediaSourceFileName(source, "", 2048)
     return filename if filename else None
 
-def get_output_dir():
+def get_output_dir(take_name):
     """return timestamped output dir in project's Media/stems/ folder."""
     project_path, _ = RPR.RPR_GetProjectPath("", 2048)
     if not project_path:
         project_path = str(Path.home())
-    # use UTC to avoid DTZ005 warning
-    stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+    stamp = take_name
     out = Path(project_path) / "Media" / "stems" / stamp
     out.mkdir(parents=True, exist_ok=True)
     return out
@@ -109,7 +106,7 @@ def probe_audio_file(filepath):
         return 16, 2, "s16", 44100
 
 def export_item(item, output_path):
-    """extract item as wav preserving bit depth and channels."""
+    """extract item as wav preserving bit depth and channels"""
     source = get_item_source_path(item)
     if not source:
         raise ValueError("item has no audio source")
@@ -136,7 +133,7 @@ def export_item(item, output_path):
     subprocess.run(cmd, check=True, capture_output=True)
 
 def run_separator(input_path, output_dir, model):
-    """run audio-separator using correct cli flags."""
+    """run audio-separator"""
     if not AUDIO_SEP_BIN.exists():
         raise FileNotFoundError(f"audio-separator not found at {AUDIO_SEP_BIN}")
 
@@ -241,8 +238,12 @@ def main():
     log(f"[+] preset: {preset['name']} ({preset['model']})")
     log(f"[+] sample rate: {get_project_sample_rate()} Hz")
 
-    out_dir = get_output_dir()
-    wav_in = out_dir / "_input.wav"
+    item_take = RPR.RPR_GetActiveTake(item)
+    out_dir = get_output_dir(RPR.RPR_GetTakeName(item_take))
+
+    # wav_in is the name of the ffmpeg-processed take that enters the audio-separator
+    # name the input as user date and time so new stems dont overwrite
+    wav_in = out_dir / f"input_{datetime.now(tz=timezone.utc).astimezone().strftime("%Y%m%d_%H%M")}.wav"
 
     log(f"[+] exporting item -> {wav_in.name}")
     try:
@@ -279,6 +280,7 @@ def main():
 # ============================================================
 # EXECUTION
 # ============================================================
+
 
 if __name__ == "__main__":
     try:
