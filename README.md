@@ -36,6 +36,7 @@ Reaper Audio Separator will strictly remain as a simple script. Evolving it into
 
 ## Prerequisites
 
+- At least **10 GB** of available space (recommended)
 - **Reaper 6.0+**
 - **Python 3.12** (recommended) or Python 3.10+
 - **FFmpeg** installed on your system
@@ -115,6 +116,7 @@ Assign a shortcut to the script if you want.
 The script will:
 
 - Export the selected item to WAV
+- Install the selected model if it isn't cached inside your .venv
 - Run the separation model
 - Import the separated stems as new tracks
 - Organize everything in your project's Media/stems folder
@@ -122,6 +124,7 @@ The script will:
 
 > **Processing Time**: Expect 30 seconds to 5+ minutes depending on:
 > - Length of the audio
+> - Size of the model file
 > - Model complexity
 > - Your CPU/GPU capabilities
 > - RAM availability
