@@ -5,7 +5,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-A minimal and powerful Python Audio Separator script for Reaper, designed to split audio stems directly within your DAW using state-of-art AI models.
+A minimal and powerful Python Audio Separator script for Reaper, designed to split audio stems directly within your DAW using state-of-art neural models.
 
 > **⚠️ A note for Windows users**  
 > This script was developed and tested primarily on **Linux** (Arch Linux). While it may work on Windows, functionality is currently limited and untested on Windows platforms.
@@ -115,7 +115,7 @@ Assign a shortcut to the script if you want.
 The script will:
 
 - Export the selected item to WAV
-- Run the AI separation model
+- Run the separation model
 - Import the separated stems as new tracks
 - Organize everything in your project's Media/stems folder
 
